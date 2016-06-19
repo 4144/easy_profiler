@@ -24,6 +24,11 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY
 
 include_directories(
 	include
+	/home/yse/hobby/shared_allocator/include
+)
+
+link_directories(
+    /home/yse/hobby/shared_allocator/bin
 )
 
 if(UNIX)
