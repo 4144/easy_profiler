@@ -1,0 +1,13 @@
+<RCC>
+    <qresource prefix="/">
+        <file>qtquickcontrols2.conf</file>
+        <file>algorithm.js</file>
+        <file>main.qml</file>
+        <file>ProfMainMenu.qml</file>
+        <file>Separator.qml</file>
+        <file>main.cpp</file>
+        <file>canvas.hpp</file>
+        <file>canvas.cpp</file>
+        <file>resources/menu.png</file>
+    </qresource>
+</RCC>
