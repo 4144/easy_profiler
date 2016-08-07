@@ -28,6 +28,8 @@
 #include <QMenu>
 #include <QMenuBar>
 #include <QCoreApplication>
+#include <QCloseEvent>
+#include <QSettings>
 #include "main_window.h"
 #include "blocks_tree_widget.h"
 #include "blocks_graphics_view.h"
@@ -81,9 +83,9 @@ ProfMainWindow::ProfMainWindow() : QMainWindow(), m_treeWidget(nullptr), m_graph
     menu->addAction(actionTestView);
     menuBar()->addMenu(menu);
 
-
     connect(graphicsView->view(), &ProfGraphicsView::intervalChanged, treeWidget, &ProfTreeWidget::setTreeBlocks);
 
+    loadSettings();
 
     if(QCoreApplication::arguments().size() > 1)
     {
@@ -108,14 +110,20 @@ void ProfMainWindow::onOpenFileClicked(bool)
 
 void ProfMainWindow::loadFile(const std::string& stdfilename)
 {
-    thread_blocks_tree_t prof_blocks;
+    ::profiler::thread_blocks_tree_t prof_blocks;
     auto nblocks = fillTreesFromFile(stdfilename.c_str(), prof_blocks, true);
 
     if (nblocks != 0)
     {
+        static_cast<ProfTreeWidget*>(m_treeWidget->widget())->clearSilent(true);
+
         m_lastFile = stdfilename;
-        m_currentProf.swap(prof_blocks);
-        static_cast<ProfGraphicsViewWidget*>(m_graphicsView->widget())->view()->setTree(m_currentProf);
+        ::profiler_gui::EASY_GLOBALS.selected_thread = 0;
+        ::profiler_gui::EASY_GLOBALS.profiler_blocks.swap(prof_blocks);
+        ::profiler_gui::EASY_GLOBALS.gui_blocks.resize(nblocks);
+        memset(::profiler_gui::EASY_GLOBALS.gui_blocks.data(), 0, sizeof(::profiler_gui::ProfBlock) * nblocks);
+
+        static_cast<ProfGraphicsViewWidget*>(m_graphicsView->widget())->view()->setTree(::profiler_gui::EASY_GLOBALS.profiler_blocks);
     }
 }
 
@@ -128,13 +136,19 @@ void ProfMainWindow::onReloadFileClicked(bool)
         return;
     }
 
-    thread_blocks_tree_t prof_blocks;
+    ::profiler::thread_blocks_tree_t prof_blocks;
     auto nblocks = fillTreesFromFile(m_lastFile.c_str(), prof_blocks, true);
 
     if (nblocks != 0)
     {
-        m_currentProf.swap(prof_blocks);
-        static_cast<ProfGraphicsViewWidget*>(m_graphicsView->widget())->view()->setTree(m_currentProf);
+        static_cast<ProfTreeWidget*>(m_treeWidget->widget())->clearSilent(true);
+
+        ::profiler_gui::EASY_GLOBALS.selected_thread = 0;
+        ::profiler_gui::EASY_GLOBALS.profiler_blocks.swap(prof_blocks);
+        ::profiler_gui::EASY_GLOBALS.gui_blocks.resize(nblocks);
+        memset(::profiler_gui::EASY_GLOBALS.gui_blocks.data(), 0, sizeof(::profiler_gui::ProfBlock) * nblocks);
+
+        static_cast<ProfGraphicsViewWidget*>(m_graphicsView->widget())->view()->setTree(::profiler_gui::EASY_GLOBALS.profiler_blocks);
     }
 }
 
@@ -149,11 +163,14 @@ void ProfMainWindow::onExitClicked(bool)
 
 void ProfMainWindow::onTestViewportClicked(bool)
 {
-    static_cast<ProfTreeWidget*>(m_treeWidget->widget())->clearSilent();
+    static_cast<ProfTreeWidget*>(m_treeWidget->widget())->clearSilent(true);
 
     auto view = static_cast<ProfGraphicsViewWidget*>(m_graphicsView->widget())->view();
     view->clearSilent();
-    m_currentProf.clear();
+
+    ::profiler_gui::EASY_GLOBALS.gui_blocks.clear();
+    ::profiler_gui::EASY_GLOBALS.profiler_blocks.clear();
+    ::profiler_gui::EASY_GLOBALS.selected_thread = 0;
 
     view->test(18000, 40000000, 2);
     //view->test(3, 300, 1);
@@ -161,6 +178,43 @@ void ProfMainWindow::onTestViewportClicked(bool)
 
 //////////////////////////////////////////////////////////////////////////
 
+void ProfMainWindow::closeEvent(QCloseEvent* close_event)
+{
+    saveSettings();
+    QMainWindow::closeEvent(close_event);
+}
 
+//////////////////////////////////////////////////////////////////////////
+
+void ProfMainWindow::loadSettings()
+{
+    QSettings settings(::profiler_gui::ORGANAZATION_NAME, ::profiler_gui::APPLICATION_NAME);
+    settings.beginGroup("main");
+
+    auto geometry = settings.value("geometry").toByteArray();
+    if (!geometry.isEmpty())
+    {
+        restoreGeometry(geometry);
+    }
+
+    auto last_file = settings.value("last_file");
+    if (!last_file.isNull())
+    {
+        m_lastFile = last_file.toString().toStdString();
+    }
+
+    settings.endGroup();
+}
+
+void ProfMainWindow::saveSettings()
+{
+	QSettings settings(::profiler_gui::ORGANAZATION_NAME, ::profiler_gui::APPLICATION_NAME);
+	settings.beginGroup("main");
+
+	settings.setValue("geometry", this->saveGeometry());
+    settings.setValue("last_file", m_lastFile.c_str());
+
+	settings.endGroup();
+}
 
 //////////////////////////////////////////////////////////////////////////

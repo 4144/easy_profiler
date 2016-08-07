@@ -35,15 +35,18 @@ protected:
 
     typedef ProfMainWindow This;
 
-    ::std::string            m_lastFile;
-    thread_blocks_tree_t  m_currentProf;
-    QDockWidget*           m_treeWidget;
-    QDockWidget*         m_graphicsView;
+    ::std::string     m_lastFile;
+    QDockWidget*    m_treeWidget;
+    QDockWidget*  m_graphicsView;
 
 public:
 
     ProfMainWindow();
     virtual ~ProfMainWindow();
+
+    // Public virtual methods
+
+    void closeEvent(QCloseEvent* close_event) override;
 
 protected slots:
 
@@ -54,7 +57,12 @@ protected slots:
 
 private:
 
+    // Private non-virtual methods
+
     void loadFile(const std::string& filename);
+
+    void loadSettings();
+	void saveSettings();
 
 }; // END of class ProfMainWindow.
 

@@ -8,6 +8,10 @@
 #include "main_window.h"
 #include "profiler/reader.h"
 
+#ifdef WIN32
+#pragma comment(linker, "/SUBSYSTEM:windows /ENTRY:mainCRTStartup")
+#endif
+
 int main(int argc, char **argv)
 {
 	QApplication app(argc, argv);
@@ -50,7 +54,7 @@ int main(int argc, char **argv)
                 return app.exec();
             }
 
-            thread_blocks_tree_t threaded_trees;
+            ::profiler::thread_blocks_tree_t threaded_trees;
             fillTreesFromFile("test.prof", threaded_trees, true);
 
             ProfGraphicsView gview(threaded_trees);
@@ -61,7 +65,7 @@ int main(int argc, char **argv)
 
         case 1:
         {
-            thread_blocks_tree_t threaded_trees;
+            ::profiler::thread_blocks_tree_t threaded_trees;
             auto nblocks = fillTreesFromFile("test.prof", threaded_trees, true);
 
             ProfTreeWidget view(nblocks, threaded_trees);

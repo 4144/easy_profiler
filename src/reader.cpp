@@ -162,16 +162,16 @@ typedef ::std::unordered_map<::std::string, ::profiler::BlockStatistics*> StatsM
 automatically receive statistics update.
 
 */
-void update_statistics(StatsMap& _stats_map, ::profiler::SerilizedBlock* _current, ::profiler::BlockStatistics*& _stats)
+void update_statistics(StatsMap& _stats_map, const ::profiler::BlocksTree& _current, ::profiler::BlockStatistics*& _stats)
 {
-    auto duration = _current->block()->duration();
-    StatsMap::key_type key(_current->getBlockName());
+    auto duration = _current.node->block()->duration();
+    StatsMap::key_type key(_current.node->getBlockName());
     auto it = _stats_map.find(key);
     if (it != _stats_map.end())
     {
         // Update already existing statistics
 
-        _stats = it->second; // write pointer to statistics into output (this is BlocksTree::total_statistics or BlocksTree::frame_statistics)
+        _stats = it->second; // write pointer to statistics into output (this is BlocksTree:: per_thread_stats or per_parent_stats or per_frame_stats)
 
         ++_stats->calls_number; // update calls number of this block
         _stats->total_duration += duration; // update summary duration of all block calls
@@ -180,7 +180,7 @@ void update_statistics(StatsMap& _stats_map, ::profiler::SerilizedBlock* _curren
         if (duration > _stats->max_duration)
         {
             // update max duration
-            _stats->max_duration_block = _current;
+            _stats->max_duration_block = _current.block_index;
             _stats->max_duration = duration;
         }
 
@@ -188,7 +188,7 @@ void update_statistics(StatsMap& _stats_map, ::profiler::SerilizedBlock* _curren
         if (duration < _stats->min_duration)
         {
             // update min duraton
-            _stats->min_duration_block = _current;
+            _stats->min_duration_block = _current.block_index;
             _stats->min_duration = duration;
         }
 
@@ -198,28 +198,46 @@ void update_statistics(StatsMap& _stats_map, ::profiler::SerilizedBlock* _curren
     {
         // This is first time the block appear in the file.
         // Create new statistics.
-        _stats = new ::profiler::BlockStatistics(duration, _current);
+        _stats = new ::profiler::BlockStatistics(duration, _current.block_index);
         _stats_map.insert(::std::make_pair(key, _stats));
     }
 }
 
 //////////////////////////////////////////////////////////////////////////
 
+void update_statistics_recursive(StatsMap& _stats_map, ::profiler::BlocksTree& _current)
+{
+    update_statistics(_stats_map, _current, _current.per_frame_stats);
+
+    for (auto& child : _current.children)
+    {
+        update_statistics_recursive(_stats_map, child);
+    }
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+typedef ::std::map<::profiler::thread_id_t, StatsMap> PerThreadStats;
+
 extern "C"{
-    unsigned int fillTreesFromFile(const char* filename, thread_blocks_tree_t& threaded_trees, bool gather_statistics)
+
+    unsigned int fillTreesFromFile(const char* filename, ::profiler::thread_blocks_tree_t& threaded_trees, bool gather_statistics)
 	{
-		std::ifstream inFile(filename, std::fstream::binary);
+        PROFILER_BEGIN_FUNCTION_BLOCK_GROUPED(::profiler::colors::Cyan)
+
+		::std::ifstream inFile(filename, ::std::fstream::binary);
 
 		if (!inFile.is_open()){
             return 0;
 		}
 
-        StatsMap overall_statistics, frame_statistics;
+        //StatsMap overall_statistics;
+        PerThreadStats thread_statistics, parent_statistics, frame_statistics;
 
 		unsigned int blocks_counter = 0;
 
 		while (!inFile.eof()){
-            PROFILER_BEGIN_BLOCK("Read block from file")
+            PROFILER_BEGIN_BLOCK_GROUPED("Read block from file", ::profiler::colors::Green)
 			uint16_t sz = 0;
 			inFile.read((char*)&sz, sizeof(sz));
 			if (sz == 0)
@@ -231,99 +249,81 @@ extern "C"{
             // TODO: use salloc::shared_allocator for allocation/deallocation safety
 			char* data = new char[sz];
 			inFile.read((char*)&data[0], sz);
-			profiler::BaseBlockData* baseData = (profiler::BaseBlockData*)data;
+			::profiler::BaseBlockData* baseData = (::profiler::BaseBlockData*)data;
 
-			BlocksTree& root = threaded_trees[baseData->getThreadId()];
+            auto block_thread_id = baseData->getThreadId();
+            auto& root = threaded_trees[block_thread_id];
+            auto& per_parent_statistics = parent_statistics[block_thread_id];
+            auto& per_thread_statistics = thread_statistics[block_thread_id];
 
-			BlocksTree tree;
-			tree.node = new profiler::SerilizedBlock(sz, data);
-			++blocks_counter;
+            ::profiler::BlocksTree tree;
+			tree.node = new ::profiler::SerilizedBlock(sz, data);
+			tree.block_index = blocks_counter++;
 
-			if (::profiler::BLOCK_TYPE_THREAD_SIGN == baseData->getType()){
-				root.thread_name = tree.node->getBlockName();
-			}
-
-            if (!root.children.empty())
+            if (::profiler::BLOCK_TYPE_THREAD_SIGN == baseData->getType())
             {
-                BlocksTree& back = root.children.back();
+                root.thread_name = tree.node->getBlockName();
+            }
+
+            if (!root.tree.children.empty())
+            {
+                auto& back = root.tree.children.back();
                 auto t1 = back.node->block()->getEnd();
                 auto mt0 = tree.node->block()->getBegin();
                 if (mt0 < t1)//parent - starts earlier than last ends
                 {
-                    //auto lower = std::lower_bound(root.children.begin(), root.children.end(), tree);
+                    //auto lower = ::std::lower_bound(root.children.begin(), root.children.end(), tree);
                     /**/
-                    PROFILER_BEGIN_BLOCK("Find children")
-                    auto rlower1 = ++root.children.rbegin();
-                    for(; rlower1 != root.children.rend(); ++rlower1){
+                    PROFILER_BEGIN_BLOCK_GROUPED("Find children", ::profiler::colors::Blue)
+                    auto rlower1 = ++root.tree.children.rbegin();
+                    for(; rlower1 != root.tree.children.rend(); ++rlower1){
                         if(mt0 > rlower1->node->block()->getBegin())
                         {
                             break;
                         }
                     }
                     auto lower = rlower1.base();
-                    std::move(lower, root.children.end(), std::back_inserter(tree.children));
+                    ::std::move(lower, root.tree.children.end(), ::std::back_inserter(tree.children));
 
-                    root.children.erase(lower, root.children.end());
+                    root.tree.children.erase(lower, root.tree.children.end());
 
+                    ::profiler::timestamp_t children_duration = 0;
                     if (gather_statistics)
                     {
-                        PROFILER_BEGIN_BLOCK("Gather statistic for frame")
-                        frame_statistics.clear();
+                        PROFILER_BEGIN_BLOCK_GROUPED("Gather statistic within parent", ::profiler::colors::Magenta)
+                        per_parent_statistics.clear();
 
-                        //frame_statistics.reserve(tree.children.size());     // this gives slow-down on Windows
-                        //frame_statistics.reserve(tree.children.size() * 2); // this gives no speed-up on Windows
+                        //per_parent_statistics.reserve(tree.children.size());     // this gives slow-down on Windows
+                        //per_parent_statistics.reserve(tree.children.size() * 2); // this gives no speed-up on Windows
                         // TODO: check this behavior on Linux
 
                         for (auto& child : tree.children)
                         {
-#ifdef PROFILER_COUNT_TOTAL_CHILDREN_NUMBER
+                            update_statistics(per_parent_statistics, child, child.per_parent_stats);
+
+                            children_duration += child.node->block()->duration();
                             tree.total_children_number += child.total_children_number;
-#endif
-
-                            update_statistics(frame_statistics, child.node, child.frame_statistics);
-
-#ifdef PROFILER_COUNT_DEPTH
                             if (tree.depth < child.depth)
                                 tree.depth = child.depth;
-#endif
                         }
-
-#ifdef PROFILER_COUNT_TOTAL_CHILDREN_NUMBER
-                        tree.total_children_number += static_cast<unsigned int>(tree.children.size());
-#endif
-
-#ifdef PROFILER_COUNT_DEPTH
-                        ++tree.depth;
-#endif
                     }
-#if defined(PROFILER_COUNT_TOTAL_CHILDREN_NUMBER) || defined(PROFILER_COUNT_DEPTH)
                     else
                     {
-                        for (auto& child : tree.children)
+                        for (const auto& child : tree.children)
                         {
-#ifdef PROFILER_COUNT_TOTAL_CHILDREN_NUMBER
+                            children_duration += child.node->block()->duration();
                             tree.total_children_number += child.total_children_number;
-#endif
-
-#ifdef PROFILER_COUNT_DEPTH
                             if (tree.depth < child.depth)
                                 tree.depth = child.depth;
-#endif
                         }
-
-#ifdef PROFILER_COUNT_TOTAL_CHILDREN_NUMBER
-                        tree.total_children_number += static_cast<unsigned int>(tree.children.size());
-#endif
-
-#ifdef PROFILER_COUNT_DEPTH
-                        ++tree.depth;
-#endif
                     }
+
+                    tree.total_children_number += static_cast<unsigned int>(tree.children.size());
+                    ++tree.depth;
                 }
-#endif
             }
 
-            root.children.push_back(std::move(tree));
+            root.tree.children.emplace_back(::std::move(tree));
 
 
 			//delete[] data;
@@ -332,72 +332,60 @@ extern "C"{
 
             if (gather_statistics)
             {
-                PROFILER_BEGIN_BLOCK("Gather statistic")
-                BlocksTree& current = root.children.back();
-                update_statistics(overall_statistics, current.node, current.total_statistics);
+                PROFILER_BEGIN_BLOCK_GROUPED("Gather per thread statistics", ::profiler::colors::Coral)
+                auto& current = root.tree.children.back();
+                update_statistics(per_thread_statistics, current, current.per_thread_stats);
             }
 
 		}
 
-        PROFILER_BEGIN_BLOCK("Gather statistic for roots")
+        PROFILER_BEGIN_BLOCK_GROUPED("Gather statistics for roots", ::profiler::colors::Purple)
 		if (gather_statistics)
 		{
-			for (auto& root_value : threaded_trees)
+			for (auto& it : threaded_trees)
 			{
-                auto& root = root_value.second;
+                auto& root = it.second;
+                root.thread_id = it.first;
 
-				frame_statistics.clear();
-				for (auto& frame : root.children)
+                auto& per_parent_statistics = parent_statistics[it.first];
+                auto& per_frame_statistics = frame_statistics[it.first];
+
+				per_parent_statistics.clear();
+                for (auto& frame : root.tree.children)
 				{
-#ifdef PROFILER_COUNT_TOTAL_CHILDREN_NUMBER
-                    root.total_children_number += frame.total_children_number;
-#endif
+                    update_statistics(per_parent_statistics, frame, frame.per_parent_stats);
 
-                    update_statistics(frame_statistics, frame.node, frame.frame_statistics);
+                    // TODO: Optimize per frame stats gathering
+                    per_frame_statistics.clear();
+                    update_statistics_recursive(per_frame_statistics, frame);
 
-#ifdef PROFILER_COUNT_DEPTH
-                    if (root.depth < frame.depth)
-                        root.depth = frame.depth;
-#endif
+                    root.tree.total_children_number += frame.total_children_number;
+                    if (root.tree.depth < frame.depth)
+                        root.tree.depth = frame.depth;
 				}
 
-#ifdef PROFILER_COUNT_TOTAL_CHILDREN_NUMBER
-                root.total_children_number += static_cast<unsigned int>(root.children.size());
-#endif
-
-#ifdef PROFILER_COUNT_DEPTH
-                ++root.depth;
-#endif
+                root.tree.total_children_number += static_cast<unsigned int>(root.tree.children.size());
+                ++root.tree.depth;
 			}
 		}
-#if defined(PROFILER_COUNT_TOTAL_CHILDREN_NUMBER) || defined(PROFILER_COUNT_DEPTH)
         else
         {
-            for (auto& root_value : threaded_trees)
+            for (auto& it : threaded_trees)
             {
-                auto& root = root_value.second;
-                for (auto& frame : root.children)
-                {
-#ifdef PROFILER_COUNT_TOTAL_CHILDREN_NUMBER
-                    root.total_children_number += frame.total_children_number;
-#endif
+                auto& root = it.second;
+                root.thread_id = it.first;
 
-#ifdef PROFILER_COUNT_DEPTH
-                    if (root.depth < frame.depth)
-                        root.depth = frame.depth;
-#endif
+                for (auto& frame : root.tree.children)
+                {
+                    root.tree.total_children_number += frame.total_children_number;
+                    if (root.tree.depth < frame.depth)
+                        root.tree.depth = frame.depth;
                 }
 
-#ifdef PROFILER_COUNT_TOTAL_CHILDREN_NUMBER
-                root.total_children_number += static_cast<unsigned int>(root.children.size());
-#endif
-
-#ifdef PROFILER_COUNT_DEPTH
-                ++root.depth;
-#endif
+                root.tree.total_children_number += static_cast<unsigned int>(root.tree.children.size());
+                ++root.tree.depth;
             }
         }
-#endif
         PROFILER_END_BLOCK
         // No need to delete BlockStatistics instances - they will be deleted inside BlocksTree destructors
 

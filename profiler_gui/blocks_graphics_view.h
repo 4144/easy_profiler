@@ -31,61 +31,35 @@
 #include <QPoint>
 #include <QTimer>
 #include <stdlib.h>
-#include <vector>
 #include "graphics_scrollbar.h"
 #include "profiler/reader.h"
 #include "common_types.h"
+#include "globals.h"
 
 //////////////////////////////////////////////////////////////////////////
-//////////////////////////////////////////////////////////////////////////
-
-#pragma pack(push, 1)
-struct ProfBlockItem
-{
-    const BlocksTree*       block; ///< Pointer to profiler block
-    qreal                       x; ///< x coordinate of the item (this is made qreal=double to avoid mistakes on very wide scene)
-    float                       w; ///< Width of the item
-    float                       y; ///< y coordinate of the item
-    float                       h; ///< Height of the item
-    QRgb                    color; ///< Background color of the item
-    unsigned int   children_begin; ///< Index of first child item on the next sublevel
-    unsigned short    totalHeight; ///< Total height of the item including heights of all it's children
-    char                    state; ///< 0 = no change, 1 = paint, -1 = do not paint
-
-    void setRect(qreal _x, float _y, float _w, float _h);
-    qreal left() const;
-    float top() const;
-    float width() const;
-    float height() const;
-    qreal right() const;
-    float bottom() const;
-};
-#pragma pack(pop)
-
 //////////////////////////////////////////////////////////////////////////
 
 class ProfGraphicsView;
 
 class ProfGraphicsItem : public QGraphicsItem
 {
-    typedef ::std::vector<ProfBlockItem>    Children;
+    typedef ::profiler_gui::ProfItems       Children;
     typedef ::std::vector<unsigned int>  DrawIndexes;
     typedef ::std::vector<Children>        Sublevels;
 
-    DrawIndexes  m_levelsIndexes; ///< Indexes of first item on each level from which we must start painting
-    Sublevels           m_levels; ///< Arrays of items for each level
+    DrawIndexes               m_levelsIndexes; ///< Indexes of first item on each level from which we must start painting
+    Sublevels                        m_levels; ///< Arrays of items for each level
 
-    QRectF               m_boundingRect; ///< boundingRect (see QGraphicsItem)
-    const BlocksTree*           m_pRoot; ///< Pointer to the root profiler block (thread block). Used by ProfTreeWidget to restore hierarchy.
-    ::profiler::thread_id_t m_thread_id; ///< Thread id to which this item belongs
-    QRgb              m_backgroundColor; ///< Background color (to enable AlternateColors behavior like in QTreeWidget)
-    const bool                  m_bTest; ///< If true then we are running test()
+    QRectF                     m_boundingRect; ///< boundingRect (see QGraphicsItem)
+    const ::profiler::BlocksTreeRoot* m_pRoot; ///< Pointer to the root profiler block (thread block). Used by ProfTreeWidget to restore hierarchy.
+    QRgb                    m_backgroundColor; ///< Background color (to enable AlternateColors behavior like in QTreeWidget)
+    const bool                        m_bTest; ///< If true then we are running test()
 
 public:
 
     ProfGraphicsItem();
     ProfGraphicsItem(bool _test);
-    ProfGraphicsItem(::profiler::thread_id_t _thread_id, const BlocksTree* _root);
+    ProfGraphicsItem(const ::profiler::BlocksTreeRoot* _root);
     virtual ~ProfGraphicsItem();
 
     // Public virtual methods
@@ -102,6 +76,8 @@ public:
 
     void setBackgroundColor(QRgb _color);
 
+    ::profiler::thread_id_t threadId() const;
+
     ///< Returns number of levels
     unsigned short levels() const;
 
@@ -116,7 +92,7 @@ public:
     
     \param _level Index of the level
     \param _items Desired number of items on this level */
-    void reserve(unsigned short _level, size_t _items);
+    void reserve(unsigned short _level, unsigned int _items);
 
     /**\brief Returns reference to the array of items of specified level.
     
@@ -127,40 +103,20 @@ public:
     
     \param _level Index of the level
     \param _index Index of required item */
-    const ProfBlockItem& getItem(unsigned short _level, size_t _index) const;
+    const ::profiler_gui::ProfBlockItem& getItem(unsigned short _level, unsigned int _index) const;
 
     /**\brief Returns reference to the item with required index on specified level.
 
     \param _level Index of the level
     \param _index Index of required item */
-    ProfBlockItem& getItem(unsigned short _level, size_t _index);
+    ::profiler_gui::ProfBlockItem& getItem(unsigned short _level, unsigned int _index);
 
     /** \brief Adds new item to required level.
     
     \param _level Index of the level
     
     \retval Index of the new created item */
-    size_t addItem(unsigned short _level);
-
-    /** \brief Adds new item to required level.
-
-    Constructs new item using copy constructor.
-
-    \param _level Index of the level
-    \param _item Reference to the source item to copy from
-
-    \retval Index of the new created item */
-    size_t addItem(unsigned short _level, const ProfBlockItem& _item);
-
-    /** \brief Adds new item to required level.
-
-    Constructs new item using move constructor.
-
-    \param _level Index of the level
-    \param _item Reference to the source item to move from
-
-    \retval Index of the new created item */
-    size_t addItem(unsigned short _level, ProfBlockItem&& _item);
+    unsigned int addItem(unsigned short _level);
 
     /** \brief Finds top-level blocks which are intersects with required selection zone.
 
@@ -169,7 +125,7 @@ public:
     \param _left Left bound of the selection zone
     \param _right Right bound of the selection zone
     \param _blocks Reference to the array of selected blocks */
-    void getBlocks(qreal _left, qreal _right, TreeBlocks& _blocks) const;
+    void getBlocks(qreal _left, qreal _right, ::profiler_gui::TreeBlocks& _blocks) const;
 
 private:
 
@@ -183,12 +139,16 @@ private:
 class ProfChronometerItem : public QGraphicsItem
 {
     QFont           m_font; ///< Font which is used to draw text
+    QPolygonF  m_indicator; ///< Indicator displayed when this chrono item is out of screen (displaying only for main item)
     QRectF  m_boundingRect; ///< boundingRect (see QGraphicsItem)
+    QColor         m_color; ///< Color of the item
     qreal  m_left, m_right; ///< Left and right bounds of the selection zone
+    bool           m_bMain; ///< Is this chronometer main (true, by default)
+    bool        m_bReverse;
 
 public:
 
-    ProfChronometerItem();
+    ProfChronometerItem(bool _main = true);
     virtual ~ProfChronometerItem();
 
     // Public virtual methods
@@ -200,9 +160,19 @@ public:
 
     // Public non-virtual methods
 
+    void setColor(const QColor& _color);
+
     void setBoundingRect(qreal x, qreal y, qreal w, qreal h);
     void setBoundingRect(const QRectF& _rect);
+
     void setLeftRight(qreal _left, qreal _right);
+
+    void setReverse(bool _reverse);
+
+    inline bool reverse() const
+    {
+        return m_bReverse;
+    }
 
     inline qreal left() const
     {
@@ -238,7 +208,7 @@ private:
     typedef ::std::vector<ProfGraphicsItem*> Items;
 
     Items                                   m_items; ///< Array of all ProfGraphicsItem items
-    TreeBlocks                     m_selectedBlocks; ///< Array of items which were selected by selection zone (ProfChronometerItem)
+    ::profiler_gui::TreeBlocks     m_selectedBlocks; ///< Array of items which were selected by selection zone (ProfChronometerItem)
     QTimer                           m_flickerTimer; ///< Timer for flicking behavior
     QRectF                       m_visibleSceneRect; ///< Visible scene rectangle
     ::profiler::timestamp_t             m_beginTime; ///< Begin time of profiler session. Used to reduce values of all begin and end times of profiler blocks.
@@ -246,24 +216,27 @@ private:
     qreal                                  m_offset; ///< Have to use manual offset for all scene content instead of using scrollbars because QScrollBar::value is 32-bit integer :(
     QPoint                          m_mousePressPos; ///< Last mouse global position (used by mousePressEvent and mouseMoveEvent)
     Qt::MouseButtons                 m_mouseButtons; ///< Pressed mouse buttons
-    GraphicsHorizontalScrollbar*       m_pScrollbar; ///< Pointer to the graphics scrollbar widget
-    ProfChronometerItem*          m_chronometerItem; ///< Pointer to the ProfChronometerItem which is displayed when you press right mouse button and move mouse left or right
-    int                              m_flickerSpeed; ///< Current flicking speed
+    ProfGraphicsScrollbar*             m_pScrollbar; ///< Pointer to the graphics scrollbar widget
+    ProfChronometerItem*          m_chronometerItem; ///< Pointer to the ProfChronometerItem which is displayed when you press right mouse button and move mouse left or right. This item is used to select blocks to display in tree widget.
+    ProfChronometerItem*       m_chronometerItemAux; ///< Pointer to the ProfChronometerItem which is displayed when you double click left mouse button and move mouse left or right. This item is used only to measure time.
+    int                             m_flickerSpeedX; ///< Current flicking speed x
+    int                             m_flickerSpeedY; ///< Current flicking speed y
+    bool                             m_bDoubleClick; ///< Is mouse buttons double clicked
     bool                            m_bUpdatingRect; ///< Stub flag which is used to avoid excess calculations on some scene update (flicking, scaling and so on)
     bool                                    m_bTest; ///< Testing flag (true when test() is called)
     bool                                   m_bEmpty; ///< Indicates whether scene is empty and has no items
-    bool                         m_bStrictSelection; ///< Strict selection flag used by ProfTreeWidget to interpret left and right bounds of selection zone in different ways
 
 public:
 
     ProfGraphicsView(bool _test = false);
-    ProfGraphicsView(const thread_blocks_tree_t& _blocksTree);
+    ProfGraphicsView(const ::profiler::thread_blocks_tree_t& _blocksTree);
     virtual ~ProfGraphicsView();
 
     // Public virtual methods
 
     void wheelEvent(QWheelEvent* _event) override;
     void mousePressEvent(QMouseEvent* _event) override;
+    void mouseDoubleClickEvent(QMouseEvent* _event) override;
     void mouseReleaseEvent(QMouseEvent* _event) override;
     void mouseMoveEvent(QMouseEvent* _event) override;
     void resizeEvent(QResizeEvent* _event) override;
@@ -272,28 +245,30 @@ public:
 
     // Public non-virtual methods
 
-    void setScrollbar(GraphicsHorizontalScrollbar* _scrollbar);
+    void setScrollbar(ProfGraphicsScrollbar* _scrollbar);
     void clearSilent();
 
-    void test(size_t _frames_number, size_t _total_items_number_estimate, int _rows);
-    void setTree(const thread_blocks_tree_t& _blocksTree);
+    void test(unsigned int _frames_number, unsigned int _total_items_number_estimate, int _rows);
+    void setTree(const ::profiler::thread_blocks_tree_t& _blocksTree);
 
 signals:
 
     // Signals
 
-    void intervalChanged(const TreeBlocks& _blocks, ::profiler::timestamp_t _session_begin_time, ::profiler::timestamp_t _left, ::profiler::timestamp_t _right, bool _strict);
+    void intervalChanged(const ::profiler_gui::TreeBlocks& _blocks, ::profiler::timestamp_t _session_begin_time, ::profiler::timestamp_t _left, ::profiler::timestamp_t _right, bool _strict);
 
 private:
 
     // Private non-virtual methods
 
+    ProfChronometerItem* createChronometer(bool _main = true);
+    bool moveChrono(ProfChronometerItem* _chronometerItem, qreal _mouseX);
     void initMode();
     void updateVisibleSceneRect();
     void updateScene();
     void scaleTo(qreal _scale);
-    qreal setTree(ProfGraphicsItem* _item, const BlocksTree::children_t& _children, qreal& _height, qreal _y, unsigned short _level);
-    void fillTestChildren(ProfGraphicsItem* _item, const int _maxlevel, int _level, qreal _x, qreal _y, size_t _childrenNumber, size_t& _total_items);
+    qreal setTree(ProfGraphicsItem* _item, const ::profiler::BlocksTree::children_t& _children, qreal& _height, qreal _y, unsigned short _level);
+    void fillTestChildren(ProfGraphicsItem* _item, const int _maxlevel, int _level, qreal _x, qreal _y, unsigned int _childrenNumber, unsigned int& _total_items);
 
 private slots:
 
@@ -302,6 +277,7 @@ private slots:
     void onScrollbarValueChange(int);
     void onGraphicsScrollbarValueChange(qreal);
     void onFlickerTimeout();
+    void onSelectedThreadChange(::profiler::thread_id_t _id);
 
 public:
 
@@ -361,12 +337,12 @@ class ProfGraphicsViewWidget : public QWidget
 private:
 
     ProfGraphicsView*                 m_view;
-    GraphicsHorizontalScrollbar* m_scrollbar;
+    ProfGraphicsScrollbar* m_scrollbar;
 
 public:
 
     ProfGraphicsViewWidget(bool _test = false);
-    ProfGraphicsViewWidget(const thread_blocks_tree_t& _blocksTree);
+    ProfGraphicsViewWidget(const ::profiler::thread_blocks_tree_t& _blocksTree);
     virtual ~ProfGraphicsViewWidget();
 
     ProfGraphicsView* view();
