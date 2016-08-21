@@ -32,7 +32,6 @@
 #include <vector>
 #include "profiler/reader.h"
 #include "common_types.h"
-#include "globals.h"
 
 //////////////////////////////////////////////////////////////////////////
 
@@ -62,9 +61,10 @@ public:
     ::profiler::timestamp_t duration() const;
     ::profiler::timestamp_t selfDuration() const;
 
-    void setTimeSmart(int _column, const ::profiler::timestamp_t& _time);
+    void setTimeSmart(int _column, const ::profiler::timestamp_t& _time, const QString& _prefix = "");
 
     void setTimeMs(int _column, const ::profiler::timestamp_t& _time);
+    void setTimeMs(int _column, const ::profiler::timestamp_t& _time, const QString& _prefix);
 
     void setBackgroundColor(QRgb _color);
 
@@ -94,7 +94,7 @@ public: \
 private: \
     void onToggle(bool) { emit clicked(m_item); }
 
-DECLARE_QACTION(ProfItemAction, ProfTreeWidgetItem*) signals: void clicked(ProfTreeWidgetItem* _item); };
+DECLARE_QACTION(ProfItemAction, unsigned int) signals: void clicked(unsigned int _item); };
 DECLARE_QACTION(ProfHideShowColumnAction, int) signals: void clicked(int _item); };
 
 #undef DECLARE_QACTION
@@ -121,7 +121,6 @@ protected:
 public:
 
     ProfTreeWidget(QWidget* _parent = nullptr);
-    ProfTreeWidget(const unsigned int _blocksNumber, const ::profiler::thread_blocks_tree_t& _blocksTree, QWidget* _parent = nullptr);
     virtual ~ProfTreeWidget();
 
     void clearSilent(bool _global = false);
@@ -144,9 +143,7 @@ protected:
 
 private slots:
 
-    void onJumpToMinItemClicked(ProfTreeWidgetItem* _item);
-
-    void onJumpToMaxItemClicked(ProfTreeWidgetItem* _item);
+    void onJumpToItemClicked(unsigned int _block_index);
 
     void onCollapseAllClicked(bool);
 
@@ -161,6 +158,8 @@ private slots:
     void onColorizeRowsTriggered(bool _colorize);
 
     void onSelectedThreadChange(::profiler::thread_id_t _id);
+
+    void onSelectedBlockChange(unsigned int _block_index);
 
     void resizeColumnsToContents();
 

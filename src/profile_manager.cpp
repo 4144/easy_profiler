@@ -18,7 +18,7 @@ extern "C"{
     {
         ProfileManager::instance().setEnabled(isEnable);
     }
-	void PROFILER_API beginBlock(Block* _block)
+    void PROFILER_API beginBlock(Block* _block)
 	{
 		ProfileManager::instance().beginBlock(_block);
 	}
@@ -34,59 +34,68 @@ extern "C"{
 	}
 }
 
-SerilizedBlock::SerilizedBlock(Block* block):
-		m_size(0),
-		m_data(nullptr)
+SerializedBlock::SerializedBlock(const Block* block)
+    : m_size(sizeof(BaseBlockData))
+    , m_data(nullptr)
 {
-	m_size += sizeof(BaseBlockData);
-	uint16_t name_len = (uint16_t)strlen(block->getName()) + 1;
-	m_size += name_len;
+    uint16_t name_len = static_cast<uint16_t>(strlen(block->getName()) + 1);
+    m_size += name_len;
 
-	m_data = new char[m_size];
-	memcpy(&m_data[0], block, sizeof(BaseBlockData));
-	strncpy(&m_data[sizeof(BaseBlockData)], block->getName(), name_len);
+    m_data = new char[m_size];
+    memcpy(m_data, block, sizeof(BaseBlockData));
+    strncpy(m_data + sizeof(BaseBlockData), block->getName(), name_len);
 }
 
-SerilizedBlock::SerilizedBlock(uint16_t _size, char* _data) :
-		m_size(_size),
-		m_data(_data)
+SerializedBlock::SerializedBlock(uint16_t _size, char* _data)
+    : m_size(_size)
+    , m_data(_data)
 {
-	//m_data = new char[m_size];
-	//memcpy(&m_data[0], _data, m_size);
 }
 
-SerilizedBlock::~SerilizedBlock()
+SerializedBlock::~SerializedBlock()
 {
-	if (m_data){
-		delete[] m_data;
-		m_data = nullptr;
-	}
+    if (m_data != nullptr)
+        delete[] m_data;
 }
 
-SerilizedBlock::SerilizedBlock(const SerilizedBlock& other)
+SerializedBlock::SerializedBlock(const SerializedBlock& other)
+    : m_size(other.m_size)
+    , m_data(new char[other.m_size])
 {
-	m_size = other.m_size;
-	m_data = new char[m_size];
-	memcpy(&m_data[0], other.m_data, m_size);
+    memcpy(m_data, other.m_data, m_size);
 }
 
-SerilizedBlock::SerilizedBlock(SerilizedBlock&& that)
+SerializedBlock::SerializedBlock(SerializedBlock&& that)
+    : m_size(that.m_size)
+    , m_data(that.m_data)
 {
-	m_size = that.m_size;
-	m_data = that.m_data;
-	that.m_size = 0;
-	that.m_data = nullptr;
+    that.m_size = 0;
+    that.m_data = nullptr;
 }
 
-const BaseBlockData * SerilizedBlock::block() const
+const BaseBlockData * SerializedBlock::block() const
 {
-	return (const BaseBlockData*)m_data;
+    return reinterpret_cast<const BaseBlockData*>(m_data);
 }
 
-const char* SerilizedBlock::getBlockName() const
+const char* SerializedBlock::getBlockName() const
 {
-	return (const char*)&m_data[sizeof(profiler::BaseBlockData)];
+    return m_data + sizeof(BaseBlockData);
 }
+
+//////////////////////////////////////////////////////////////////////////
+
+BlockSourceInfo::BlockSourceInfo(const char* _filename, int _linenumber) : m_id(ProfileManager::instance().addSource(_filename, _linenumber))
+{
+
+}
+
+SourceBlock::SourceBlock(const char* _filename, int _line) : m_filename(_filename), m_line(_line)
+{
+
+}
+
+//////////////////////////////////////////////////////////////////////////
 
 ProfileManager::ProfileManager()
 {
@@ -150,7 +159,7 @@ void ProfileManager::setEnabled(bool isEnable)
 void ProfileManager::_internalInsertBlock(profiler::Block* _block)
 {
 	guard_lock_t lock(m_storedSpin);
-	m_blocks.emplace_back(new SerilizedBlock(_block));
+	m_blocks.emplace_back(new SerializedBlock(_block));
 }
 
 unsigned int ProfileManager::dumpBlocksToFile(const char* filename)
@@ -180,6 +189,19 @@ void ProfileManager::setThreadName(const char* name)
         return;
 
     profiler::Block block(name, current_thread_id, 0, profiler::BLOCK_TYPE_THREAD_SIGN);
-    m_blocks.emplace_back(new SerilizedBlock(&block));
+    m_blocks.emplace_back(new SerializedBlock(&block));
     m_namedThreades.insert(current_thread_id);
 }
+
+//////////////////////////////////////////////////////////////////////////
+
+unsigned int ProfileManager::addSource(const char* _filename, int _line)
+{
+    guard_lock_t lock(m_storedSpin);
+    const auto id = static_cast<unsigned int>(m_sources.size());
+    m_sources.emplace_back(_filename, _line);
+    return id;
+}
+
+//////////////////////////////////////////////////////////////////////////
+

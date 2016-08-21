@@ -22,6 +22,7 @@
 #include <QContextMenuEvent>
 #include <QMenu>
 #include "graphics_scrollbar.h"
+#include "globals.h"
 
 //////////////////////////////////////////////////////////////////////////
 
@@ -29,6 +30,7 @@ const qreal SCALING_COEFFICIENT = 1.25;
 const qreal SCALING_COEFFICIENT_INV = 1.0 / SCALING_COEFFICIENT;
 const int DEFAULT_TOP = -40;
 const int DEFAULT_HEIGHT = 80;
+const int INDICATOR_SIZE = 8;
 
 //////////////////////////////////////////////////////////////////////////
 
@@ -39,8 +41,20 @@ auto const clamp = [](qreal _minValue, qreal _value, qreal _maxValue)
 
 //////////////////////////////////////////////////////////////////////////
 
-ProfGraphicsSliderItem::ProfGraphicsSliderItem() : Parent(), m_halfwidth(0)
+ProfGraphicsSliderItem::ProfGraphicsSliderItem(bool _main) : Parent(), m_halfwidth(0)
 {
+    m_leftIndicator.reserve(3);
+    m_rightIndicator.reserve(3);
+
+    const auto vcenter = DEFAULT_TOP + (_main ? INDICATOR_SIZE : DEFAULT_HEIGHT - INDICATOR_SIZE);
+    m_leftIndicator.push_back(QPointF(-INDICATOR_SIZE, vcenter - INDICATOR_SIZE));
+    m_leftIndicator.push_back(QPointF(0, vcenter));
+    m_leftIndicator.push_back(QPointF(-INDICATOR_SIZE, vcenter + INDICATOR_SIZE));
+
+    m_rightIndicator.push_back(QPointF(INDICATOR_SIZE, vcenter - INDICATOR_SIZE));
+    m_rightIndicator.push_back(QPointF(0, vcenter));
+    m_rightIndicator.push_back(QPointF(INDICATOR_SIZE, vcenter + INDICATOR_SIZE));
+
     setWidth(1);
     setBrush(Qt::SolidPattern);
 }
@@ -67,22 +81,27 @@ void ProfGraphicsSliderItem::paint(QPainter* _painter, const QStyleOptionGraphic
 
     QRectF r(dx + br.left() * currentScale, br.top(), w, br.height());
 
-    //auto center = r.center();
-    //auto b = brush();
-    //QPolygonF indicator;
-    //indicator.reserve(3);
-    //indicator.push_back(QPointF(center.x() - 4, r.top()));
-    //indicator.push_back(QPointF(center.x(), r.top() + 5));
-    //indicator.push_back(QPointF(center.x() + 4, r.top()));
-
     _painter->save();
     _painter->setTransform(QTransform::fromScale(1.0 / currentScale, 1), true);
     _painter->setBrush(brush());
     _painter->setPen(Qt::NoPen);
     _painter->drawRect(r);
-    //b.setColor(b.color().rgb());
-    //_painter->setBrush(b);
-    //_painter->drawPolygon(indicator);
+
+    if (w < INDICATOR_SIZE)
+    {
+        m_leftIndicator[0].setX(r.left() - INDICATOR_SIZE);
+        m_leftIndicator[1].setX(r.left());
+        m_leftIndicator[2].setX(r.left() - INDICATOR_SIZE);
+
+        const auto r_right = r.right();
+        m_rightIndicator[0].setX(r_right + INDICATOR_SIZE);
+        m_rightIndicator[1].setX(r_right);
+        m_rightIndicator[2].setX(r_right + INDICATOR_SIZE);
+
+        _painter->drawPolygon(m_leftIndicator);
+        _painter->drawPolygon(m_rightIndicator);
+    }
+
     _painter->restore();
 }
 
@@ -166,7 +185,7 @@ void ProfMinimapItem::paint(QPainter* _painter, const QStyleOptionGraphicsItem* 
         // Draw rectangle
 
         const auto h = ::std::max((item.width() - m_minDuration) * coeff, 5.0);
-        const auto col = h * heightRevert;
+        const auto col = ::std::min(h * heightRevert, 0.9999999);
         //const auto color = ::profiler_gui::toRgb(col * 255, (1.0 - col) * 255, 0); // item.color;
         const auto color = 0x00ffffff & QColor::fromHsvF((1.0 - col) * 0.35, 0.85, 0.85).rgb();
 
@@ -206,21 +225,23 @@ void ProfMinimapItem::setSource(::profiler::thread_id_t _thread_id, const ::prof
         {
             m_pSource = nullptr;
         }
-
-        m_maxDuration = 0;
-        m_minDuration = 1e30;
-        for (const auto& item : *m_pSource)
+        else
         {
-            auto w = item.width();
-
-            if (w > m_maxDuration)
+            m_maxDuration = 0;
+            m_minDuration = 1e30;
+            for (const auto& item : *m_pSource)
             {
-                m_maxDuration = item.width();
-            }
+                auto w = item.width();
 
-            if (w < m_minDuration)
-            {
-                m_minDuration = w;
+                if (w > m_maxDuration)
+                {
+                    m_maxDuration = item.width();
+                }
+
+                if (w < m_minDuration)
+                {
+                    m_minDuration = w;
+                }
             }
         }
     }
@@ -251,8 +272,8 @@ ProfGraphicsScrollbar::ProfGraphicsScrollbar(QWidget* _parent)
 {
     setCacheMode(QGraphicsView::CacheNone);
     setTransformationAnchor(QGraphicsView::AnchorUnderMouse);
-    setViewportUpdateMode(QGraphicsView::BoundingRectViewportUpdate);
-    //setViewportUpdateMode(QGraphicsView::FullViewportUpdate);
+    //setViewportUpdateMode(QGraphicsView::BoundingRectViewportUpdate);
+    setViewportUpdateMode(QGraphicsView::FullViewportUpdate);
     setOptimizationFlag(QGraphicsView::DontSavePainterState, true);
 
     setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
@@ -266,13 +287,13 @@ ProfGraphicsScrollbar::ProfGraphicsScrollbar(QWidget* _parent)
     selfScene->setSceneRect(0, DEFAULT_TOP, 500, DEFAULT_HEIGHT);
     setScene(selfScene);
 
-    m_slider = new ProfGraphicsSliderItem();
+    m_slider = new ProfGraphicsSliderItem(true);
     m_slider->setPos(0, 0);
     m_slider->setZValue(5);
     m_slider->setColor(0x80e00000);
     selfScene->addItem(m_slider);
 
-    m_chronometerIndicator = new ProfGraphicsSliderItem();
+    m_chronometerIndicator = new ProfGraphicsSliderItem(false);
     m_chronometerIndicator->setPos(0, 0);
     m_chronometerIndicator->setZValue(10);
     m_chronometerIndicator->setColor(0x40000000 | ::profiler_gui::CHRONOMETER_COLOR.rgba());
@@ -323,6 +344,16 @@ qreal ProfGraphicsScrollbar::range() const
 qreal ProfGraphicsScrollbar::value() const
 {
     return m_value;
+}
+
+qreal ProfGraphicsScrollbar::sliderWidth() const
+{
+    return m_slider->width();
+}
+
+qreal ProfGraphicsScrollbar::sliderHalfWidth() const
+{
+    return m_slider->halfwidth();
 }
 
 //////////////////////////////////////////////////////////////////////////

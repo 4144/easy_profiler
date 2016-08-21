@@ -21,7 +21,9 @@
 #include <string>
 #include <QObject>
 #include <QColor>
+#include <QTextCodec>
 #include "common_types.h"
+#include "globals_qobjects.h"
 
 //////////////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////
@@ -42,32 +44,23 @@ namespace profiler_gui {
 
     //////////////////////////////////////////////////////////////////////////
 
-    class ProfGlobalSignals final : public QObject
-    {
-        Q_OBJECT
-
-    public:
-
-        ProfGlobalSignals();
-        virtual ~ProfGlobalSignals();
-
-    signals:
-
-        void selectedThreadChanged(::profiler::thread_id_t _id);
-        void selectedBlockChanged(unsigned int _block_index);
-    };
-
-    //////////////////////////////////////////////////////////////////////////
-
+#pragma pack(push, 1)
     struct ProfBlock final
     {
-        ProfGraphicsItem*         graphics_item;
-        ProfTreeWidgetItem*           tree_item;
-        unsigned short      graphics_item_level;
-        unsigned int        graphics_item_index;
+        unsigned int            tree_item;
+        unsigned int  graphics_item_index;
+        unsigned char graphics_item_level;
+        unsigned char       graphics_item;
     };
+#pragma pack(pop)
 
     typedef ::std::vector<ProfBlock> ProfBlocks;
+
+    template <class T>
+    inline auto toUnicode(const T& _inputString) -> decltype(QTextCodec::codecForLocale()->toUnicode(_inputString))
+    {
+        return QTextCodec::codecForLocale()->toUnicode(_inputString);
+    }
 
     //////////////////////////////////////////////////////////////////////////
 
@@ -75,20 +68,21 @@ namespace profiler_gui {
     {
         static ProfGlobals& instance();
 
-        ProfGlobalSignals                         events;
-        ::profiler::thread_blocks_tree_t profiler_blocks;
-        ProfBlocks                            gui_blocks;
-        ::profiler::thread_id_t          selected_thread;
-        unsigned int                      selected_block;
-        bool                 draw_graphics_items_borders;
+        ProfGlobalSignals                         events; ///< Global signals
+        ::profiler::thread_blocks_tree_t profiler_blocks; ///< Profiler blocks tree loaded from file
+        ProfBlocks                            gui_blocks; ///< Profiler graphics blocks builded by GUI
+        ::profiler::thread_id_t          selected_thread; ///< Current selected thread id
+        unsigned int                      selected_block; ///< Current selected profiler block index
+        bool                 draw_graphics_items_borders; ///< Draw borders for graphics blocks or not
+        bool                 display_only_relevant_stats; ///< Display only relevant information in ProfTreeWidget (excludes min, max, average times if there are only 1 calls number)
 
     private:
 
         ProfGlobals();
     };
-
+#ifndef IGNORE_GLOBALS_DECLARATION
     static ProfGlobals& EASY_GLOBALS = ProfGlobals::instance();
-
+#endif
     //////////////////////////////////////////////////////////////////////////
 
 } // END of namespace profiler_gui.

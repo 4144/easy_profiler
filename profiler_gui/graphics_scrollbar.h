@@ -23,8 +23,8 @@
 #include <QGraphicsScene>
 #include <QGraphicsRectItem>
 #include <QAction>
+#include <QPolygonF>
 #include "common_types.h"
-#include "globals.h"
 
 //////////////////////////////////////////////////////////////////////////
 
@@ -35,11 +35,12 @@ class ProfGraphicsSliderItem : public QGraphicsRectItem
 
 private:
 
+    QPolygonF m_leftIndicator, m_rightIndicator;
     qreal m_halfwidth;
 
 public:
 
-    ProfGraphicsSliderItem();
+    ProfGraphicsSliderItem(bool _main);
     virtual ~ProfGraphicsSliderItem();
 
     void paint(QPainter* _painter, const QStyleOptionGraphicsItem* _option, QWidget* _widget = nullptr) override;
@@ -177,6 +178,8 @@ public:
     qreal maximum() const;
     qreal range() const;
     qreal value() const;
+    qreal sliderWidth() const;
+    qreal sliderHalfWidth() const;
 
     void setValue(qreal _value);
     void setRange(qreal _minValue, qreal _maxValue);

@@ -15,20 +15,14 @@
 * license           : TODO: add license text
 ************************************************************************/
 
+#define IGNORE_GLOBALS_DECLARATION
 #include "globals.h"
+#undef IGNORE_GLOBALS_DECLARATION
 
 //////////////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////
 
 namespace profiler_gui {
-
-    ProfGlobalSignals::ProfGlobalSignals() : QObject()
-    {
-    }
-
-    ProfGlobalSignals::~ProfGlobalSignals()
-    {
-    }
 
     ProfGlobals& ProfGlobals::instance()
     {
@@ -38,8 +32,9 @@ namespace profiler_gui {
 
     ProfGlobals::ProfGlobals()
         : selected_thread(0)
-        , selected_block(0)
+        , selected_block(-1)
         , draw_graphics_items_borders(true)
+        , display_only_relevant_stats(true)
     {
 
     }

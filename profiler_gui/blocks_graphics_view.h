@@ -30,16 +30,33 @@
 #include <QFont>
 #include <QPoint>
 #include <QTimer>
+#include <QLabel>
+#include <QLayout>
 #include <stdlib.h>
 #include "graphics_scrollbar.h"
 #include "profiler/reader.h"
 #include "common_types.h"
-#include "globals.h"
 
 //////////////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////
 
 class ProfGraphicsView;
+
+//////////////////////////////////////////////////////////////////////////
+
+inline qreal units2microseconds(qreal _value)
+{
+    return _value;
+    //return _value * 1e3;
+}
+
+inline qreal microseconds2units(qreal _value)
+{
+    return _value;
+    //return _value * 1e-3;
+}
+
+//////////////////////////////////////////////////////////////////////////
 
 class ProfGraphicsItem : public QGraphicsItem
 {
@@ -52,71 +69,73 @@ class ProfGraphicsItem : public QGraphicsItem
 
     QRectF                     m_boundingRect; ///< boundingRect (see QGraphicsItem)
     const ::profiler::BlocksTreeRoot* m_pRoot; ///< Pointer to the root profiler block (thread block). Used by ProfTreeWidget to restore hierarchy.
-    QRgb                    m_backgroundColor; ///< Background color (to enable AlternateColors behavior like in QTreeWidget)
     const bool                        m_bTest; ///< If true then we are running test()
+    unsigned char                     m_index; ///< This item's index in the list of items of ProfGraphicsView
 
 public:
 
-    ProfGraphicsItem();
-    ProfGraphicsItem(bool _test);
-    ProfGraphicsItem(const ::profiler::BlocksTreeRoot* _root);
+    ProfGraphicsItem(unsigned char _index, bool _test);
+    ProfGraphicsItem(unsigned char _index, const::profiler::BlocksTreeRoot* _root);
     virtual ~ProfGraphicsItem();
 
     // Public virtual methods
 
     QRectF boundingRect() const override;
+
     void paint(QPainter* _painter, const QStyleOptionGraphicsItem* _option, QWidget* _widget = nullptr) override;
 
 public:
 
     // Public non-virtual methods
 
+    QRect getRect() const;
+
     void setBoundingRect(qreal x, qreal y, qreal w, qreal h);
     void setBoundingRect(const QRectF& _rect);
-
-    void setBackgroundColor(QRgb _color);
 
     ::profiler::thread_id_t threadId() const;
 
     ///< Returns number of levels
-    unsigned short levels() const;
+    unsigned char levels() const;
+
+    float levelY(unsigned char _level) const;
 
     /** \brief Sets number of levels.
     
     \note Must be set before doing anything else.
     
     \param _levels Desired number of levels */
-    void setLevels(unsigned short _levels);
+    void setLevels(unsigned char _levels);
 
     /** \brief Reserves memory for desired number of items on specified level.
     
     \param _level Index of the level
     \param _items Desired number of items on this level */
-    void reserve(unsigned short _level, unsigned int _items);
+    void reserve(unsigned char _level, unsigned int _items);
 
     /**\brief Returns reference to the array of items of specified level.
     
     \param _level Index of the level */
-    const Children& items(unsigned short _level) const;
+    const Children& items(unsigned char _level) const;
 
     /**\brief Returns reference to the item with required index on specified level.
     
     \param _level Index of the level
     \param _index Index of required item */
-    const ::profiler_gui::ProfBlockItem& getItem(unsigned short _level, unsigned int _index) const;
+    const ::profiler_gui::ProfBlockItem& getItem(unsigned char _level, unsigned int _index) const;
 
     /**\brief Returns reference to the item with required index on specified level.
 
     \param _level Index of the level
     \param _index Index of required item */
-    ::profiler_gui::ProfBlockItem& getItem(unsigned short _level, unsigned int _index);
+    ::profiler_gui::ProfBlockItem& getItem(unsigned char _level, unsigned int _index);
 
     /** \brief Adds new item to required level.
     
     \param _level Index of the level
     
     \retval Index of the new created item */
-    unsigned int addItem(unsigned short _level);
+    unsigned int addItem(unsigned char _level);
 
     /** \brief Finds top-level blocks which are intersects with required selection zone.
 
@@ -127,10 +146,22 @@ public:
     \param _blocks Reference to the array of selected blocks */
     void getBlocks(qreal _left, qreal _right, ::profiler_gui::TreeBlocks& _blocks) const;
 
+    const ::profiler_gui::ProfBlockItem* intersect(const QPointF& _pos) const;
+
 private:
 
     ///< Returns pointer to the ProfGraphicsView widget.
     const ProfGraphicsView* view() const;
+
+public:
+
+    // Public inline methods
+
+    ///< Returns this item's index in the list of graphics items of ProfGraphicsView
+    inline unsigned char index() const
+    {
+        return m_index;
+    }
 
 }; // END of class ProfGraphicsItem.
 
@@ -145,6 +176,7 @@ class ProfChronometerItem : public QGraphicsItem
     qreal  m_left, m_right; ///< Left and right bounds of the selection zone
     bool           m_bMain; ///< Is this chronometer main (true, by default)
     bool        m_bReverse;
+    bool          m_bHover; ///< Mouse hover above indicator
 
 public:
 
@@ -168,6 +200,15 @@ public:
     void setLeftRight(qreal _left, qreal _right);
 
     void setReverse(bool _reverse);
+
+    void setHover(bool _hover);
+
+    bool contains(const QPointF& _pos) const;
+
+    inline bool hover() const
+    {
+        return m_bHover;
+    }
 
     inline bool reverse() const
     {
@@ -198,6 +239,25 @@ private:
 
 //////////////////////////////////////////////////////////////////////////
 
+#define EASY_QGRAPHICSITEM(ClassName) \
+class ClassName : public QGraphicsItem { \
+    QRectF m_boundingRect; \
+public: \
+    ClassName() : QGraphicsItem() {} \
+    virtual ~ClassName() {} \
+    void paint(QPainter* _painter, const QStyleOptionGraphicsItem* _option, QWidget* _widget = nullptr) override; \
+    QRectF boundingRect() const override { return m_boundingRect; } \
+    void setBoundingRect(qreal x, qreal y, qreal w, qreal h) { m_boundingRect.setRect(x, y, w, h); } \
+    void setBoundingRect(const QRectF& _rect) { m_boundingRect = _rect; } \
+}
+
+EASY_QGRAPHICSITEM(ProfBackgroundItem);
+EASY_QGRAPHICSITEM(ProfTimelineIndicatorItem);
+
+#undef EASY_QGRAPHICSITEM
+
+//////////////////////////////////////////////////////////////////////////
+
 class ProfGraphicsView : public QGraphicsView
 {
     Q_OBJECT
@@ -214,7 +274,9 @@ private:
     ::profiler::timestamp_t             m_beginTime; ///< Begin time of profiler session. Used to reduce values of all begin and end times of profiler blocks.
     qreal                                   m_scale; ///< Current scale
     qreal                                  m_offset; ///< Have to use manual offset for all scene content instead of using scrollbars because QScrollBar::value is 32-bit integer :(
+    qreal                            m_timelineStep; ///< 
     QPoint                          m_mousePressPos; ///< Last mouse global position (used by mousePressEvent and mouseMoveEvent)
+    QPoint                          m_mouseMovePath; ///< Mouse move path between press and release of any button
     Qt::MouseButtons                 m_mouseButtons; ///< Pressed mouse buttons
     ProfGraphicsScrollbar*             m_pScrollbar; ///< Pointer to the graphics scrollbar widget
     ProfChronometerItem*          m_chronometerItem; ///< Pointer to the ProfChronometerItem which is displayed when you press right mouse button and move mouse left or right. This item is used to select blocks to display in tree widget.
@@ -228,8 +290,7 @@ private:
 
 public:
 
-    ProfGraphicsView(bool _test = false);
-    ProfGraphicsView(const ::profiler::thread_blocks_tree_t& _blocksTree);
+    ProfGraphicsView(QWidget* _parent = nullptr);
     virtual ~ProfGraphicsView();
 
     // Public virtual methods
@@ -248,8 +309,10 @@ public:
     void setScrollbar(ProfGraphicsScrollbar* _scrollbar);
     void clearSilent();
 
-    void test(unsigned int _frames_number, unsigned int _total_items_number_estimate, int _rows);
+    void test(unsigned int _frames_number, unsigned int _total_items_number_estimate, unsigned char _rows);
     void setTree(const ::profiler::thread_blocks_tree_t& _blocksTree);
+
+    const Items& getItems() const;
 
 signals:
 
@@ -265,10 +328,11 @@ private:
     bool moveChrono(ProfChronometerItem* _chronometerItem, qreal _mouseX);
     void initMode();
     void updateVisibleSceneRect();
+    void updateTimelineStep(qreal _windowWidth);
     void updateScene();
     void scaleTo(qreal _scale);
-    qreal setTree(ProfGraphicsItem* _item, const ::profiler::BlocksTree::children_t& _children, qreal& _height, qreal _y, unsigned short _level);
-    void fillTestChildren(ProfGraphicsItem* _item, const int _maxlevel, int _level, qreal _x, qreal _y, unsigned int _childrenNumber, unsigned int& _total_items);
+    qreal setTree(ProfGraphicsItem* _item, const ::profiler::BlocksTree::children_t& _children, qreal& _height, qreal _y, short _level);
+    void fillTestChildren(ProfGraphicsItem* _item, const int _maxlevel, int _level, qreal _x, unsigned int _childrenNumber, unsigned int& _total_items);
 
 private slots:
 
@@ -278,6 +342,7 @@ private slots:
     void onGraphicsScrollbarValueChange(qreal);
     void onFlickerTimeout();
     void onSelectedThreadChange(::profiler::thread_id_t _id);
+    void onSelectedBlockChange(unsigned int _block_index);
 
 public:
 
@@ -298,6 +363,11 @@ public:
         return m_visibleSceneRect;
     }
 
+    inline qreal timelineStep() const
+    {
+        return m_timelineStep;
+    }
+
 private:
 
     // Private inline methods
@@ -314,19 +384,25 @@ private:
         //return PROF_FROM_MILLISECONDS(_pos);
     }
 
-    inline qreal to_microseconds(qreal _value) const
-    {
-        return _value;
-        //return _value * 1e-3;
-    }
-
-    inline qreal to_milliseconds(qreal _value) const
-    {
-        return _value * 1e3;
-        //return _value;
-    }
-
 }; // END of class ProfGraphicsView.
+
+class ProfThreadViewWidget : public QWidget
+{
+    Q_OBJECT
+private:
+    ProfGraphicsView*                 m_view;
+    QLabel*                           m_label;
+    typedef ProfThreadViewWidget This;
+
+    QHBoxLayout *m_layout;
+
+public:
+   ProfThreadViewWidget(QWidget *parent, ProfGraphicsView* view);
+   virtual ~ProfThreadViewWidget();
+public slots:
+   void onSelectedThreadChange(::profiler::thread_id_t _id);
+};
+
 
 //////////////////////////////////////////////////////////////////////////
 
@@ -338,18 +414,21 @@ private:
 
     ProfGraphicsView*                 m_view;
     ProfGraphicsScrollbar* m_scrollbar;
+    //ProfThreadViewWidget* m_threadWidget;
 
 public:
 
-    ProfGraphicsViewWidget(bool _test = false);
-    ProfGraphicsViewWidget(const ::profiler::thread_blocks_tree_t& _blocksTree);
+    ProfGraphicsViewWidget(QWidget* _parent = nullptr);
     virtual ~ProfGraphicsViewWidget();
 
     ProfGraphicsView* view();
 
 private:
 
+    void initWidget();
+
 }; // END of class ProfGraphicsViewWidget.
+
 
 //////////////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////
